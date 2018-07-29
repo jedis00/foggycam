@@ -275,29 +275,42 @@ class FoggyCam(object):
         for camera in self.nest_camera_array:
             camera_path = ''
             video_path = ''
-
-            # Determine whether the entries should be copied to a custom path
-            # or not.
-            if not config.path:
-                camera_path = os.path.join(self.local_path, 'capture', camera, 'images')
-                video_path = os.path.join(self.local_path, 'capture', camera, 'video')
+            
+            # Remove Cameras not selected
+            if config.camera_ids == []:
+                # They didnt specify which camera they want
+                self.begin_capture_thread(camera, config)
             else:
-                camera_path = os.path.join(config.path, 'capture', camera, 'images')
-                video_path = os.path.join(config.path, 'capture', camera, 'video')
-
-            # Provision the necessary folders for images and videos.
-            if not os.path.exists(camera_path):
-                os.makedirs(camera_path)
-
-            if not os.path.exists(video_path):
-                os.makedirs(video_path)
-
-            image_thread = threading.Thread(target=self.perform_capture, args=(config, camera, camera_path, video_path))
-            image_thread.daemon = True
-            image_thread.start()
+                # Otherwise we want to only capture items we want
+                if camera in config.camera_ids:
+                    self.begin_capture_thread(camera, config)
+        
 
         while True:
             time.sleep(1)
+
+    def begin_capture_thread(self, camera, config):
+    
+        # Determine whether the entries should be copied to a custom path
+        # or not.
+        if not config.path:
+            camera_path = os.path.join(self.local_path, 'capture', camera, 'images')
+            video_path = os.path.join(self.local_path, 'capture', camera, 'video')
+        else:
+            camera_path = os.path.join(config.path, 'capture', camera, 'images')
+            video_path = os.path.join(config.path, 'capture', camera, 'video')
+
+        # Provision the necessary folders for images and videos.
+        if not os.path.exists(camera_path):
+            os.makedirs(camera_path)
+
+        if not os.path.exists(video_path):
+            os.makedirs(video_path)
+
+        image_thread = threading.Thread(target=self.perform_capture, args=(config, camera, camera_path, video_path))
+        image_thread.daemon = True
+        image_thread.start()
+
 
     def perform_capture(self, config=None, camera=None, camera_path='', video_path=''):
         """Captures images and generates the video from them."""
@@ -323,7 +336,10 @@ class FoggyCam(object):
 
             try:
                 response = self.merlin.open(request)
-                time.sleep(5)
+
+                # We sleep enough to match the frame rate in a minute. 
+                # If framerate is 60, we take one frame every second
+                time.sleep(60/config.frame_rate)
 
                 with open(camera_path + '/' + file_id + '.jpg', 'wb') as image_file:
                     for chunk in response:
@@ -332,7 +348,7 @@ class FoggyCam(object):
                 # Check if we need to compile a video
                 if config.produce_video:
                     camera_buffer_size = len(camera_buffer[camera])
-                    print ('[', threading.current_thread().name, '] INFO: Camera buffer size for ', camera, ': ', camera_buffer_size)
+                    print ('[', threading.current_thread().name, '] INFO:', time.time(), ' Camera buffer size for ', camera, ': ', camera_buffer_size)
 
                     if camera_buffer_size < self.nest_camera_buffer_threshold:
                         camera_buffer[camera].append(file_id)
@@ -355,9 +371,11 @@ class FoggyCam(object):
                         ffmpeg_path = ''
 
                         if shutil.which("ffmpeg"):
+                            print("Found ffmpeg")
                             ffmpeg_path = 'ffmpeg'
                             use_terminal = True
                         else:
+                            print("Using tools")
                             ffmpeg_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tools', 'ffmpeg'))
                         
                         if use_terminal or (os.path.isfile(ffmpeg_path) and use_terminal is False):
